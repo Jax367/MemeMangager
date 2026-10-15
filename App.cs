@@ -39,7 +39,7 @@ namespace MemeManager {
    window.PreviewDragOver+=(s,e)=>{e.Effects=e.Data.GetDataPresent(DataFormats.FileDrop)?DragDropEffects.Copy:DragDropEffects.None;e.Handled=true;};
    window.PreviewKeyDown+=(s,e)=>{if(e.Key==Key.Escape){window.Hide();e.Handled=true;}};
    releaseTimer=new DispatcherTimer{Interval=TimeSpan.FromSeconds(2)};releaseTimer.Tick+=(s,e)=>{releaseTimer.Stop();if(!window.IsVisible&&(picker==null||!picker.IsVisible)&&!importing)GC.Collect(2,GCCollectionMode.Forced,false);};
-   window.Closing+=(s,e)=>{if(!exiting){e.Cancel=true;window.Hide();}};window.IsVisibleChanged+=(s,e)=>{if(!window.IsVisible)ReleaseImages();};
+   window.Closing+=(s,e)=>{if(!exiting){e.Cancel=true;window.Hide();}};window.IsVisibleChanged+=(s,e)=>{UpdateWallpaper();if(!window.IsVisible)ReleaseImages();};
    Find<ScrollViewer>("Scroller").ScrollChanged+=(s,e)=>{if(e.VerticalChange!=0||e.ViewportHeightChange!=0||e.ViewportWidthChange!=0)RenderMore();};
    window.SizeChanged+=(s,e)=>RenderMore();
    handle=new WindowInteropHelper(window).EnsureHandle();source=HwndSource.FromHwnd(handle);source.AddHook(MessageHook);
@@ -146,7 +146,20 @@ namespace MemeManager {
    if(!string.IsNullOrEmpty(p.CanvasColor))SetBrush("Canvas",p.CanvasColor);if(!string.IsNullOrEmpty(p.SurfaceColor))SetBrush("Surface",p.SurfaceColor);if(!string.IsNullOrEmpty(p.InkColor))SetBrush("Ink",p.InkColor);if(!string.IsNullOrEmpty(p.SideColor))SetBrush("Side",p.SideColor);
    var sideColor=((SolidColorBrush)window.Resources["Side"]).Color;bool lightSide=.2126*sideColor.R+.7152*sideColor.G+.0722*sideColor.B>145;
    SetBrush("SideInk",lightSide?"#4A5565":"#E0E5EB");SetBrush("SideMuted",lightSide?"#737D8A":"#A4AEBB");
-   try{SetBrush("Accent",p.Accent);}catch{SetBrush("Accent","#627792");}Find<TextBlock>("ShortcutHint").Text=HotkeyText(p.Modifiers,p.HotKey)+" 呼出  ·  Esc 收起";
+   try{SetBrush("Accent",p.Accent);}catch{SetBrush("Accent","#627792");}Find<TextBlock>("ShortcutHint").Text=HotkeyText(p.Modifiers,p.HotKey)+" 呼出  ·  Esc 收起";UpdateWallpaper();
+  }
+  string wallpaperKey;
+  void UpdateWallpaper(){
+   var p=library.Data.Settings;bool visible=window.IsVisible||(picker!=null&&picker.IsVisible);
+   string key=visible?p.BackgroundImage:null;double opacity=Math.Max(0,Math.Min(100,p.BackgroundOpacity))/100.0;
+   if(string.IsNullOrEmpty(key)||opacity==0){window.Resources["Wallpaper"]=Brushes.Transparent;wallpaperKey=null;return;}
+   string cacheKey=key+":"+opacity;if(wallpaperKey==cacheKey)return;
+   window.Resources["Wallpaper"]=Brushes.Transparent;wallpaperKey=null;
+   if(!System.Text.RegularExpressions.Regex.IsMatch(key,@"^[0-9a-f]{64}\.png$"))return;
+   try{using(var stream=File.OpenRead(Path.Combine(library.Root,"backgrounds",key))){
+    var image=new BitmapImage();image.BeginInit();image.CacheOption=BitmapCacheOption.OnLoad;image.StreamSource=stream;image.EndInit();image.Freeze();
+    var brush=new ImageBrush(image){Stretch=Stretch.UniformToFill,Opacity=opacity};brush.Freeze();window.Resources["Wallpaper"]=brush;wallpaperKey=cacheKey;
+   }}catch{} // Missing or damaged wallpaper must never prevent opening the library.
   }
   void SetBrush(string key,string color){window.Resources[key]=new SolidColorBrush((Color)ColorConverter.ConvertFromString(color));}
   static string HotkeyText(uint mods,int key){return ((mods&2)!=0?"Ctrl + ":"")+((mods&4)!=0?"Shift + ":"")+((mods&1)!=0?"Alt + ":"")+((mods&8)!=0?"Win + ":"")+(key==32?"Space":KeyInterop.KeyFromVirtualKey(key).ToString());}
@@ -159,17 +172,24 @@ namespace MemeManager {
    var customGrid=new Grid();for(int c=0;c<4;c++)customGrid.ColumnDefinitions.Add(new ColumnDefinition());
    string[] customNames={"背景","卡片","文字","侧栏"};string[] customValues={p.CanvasColor,p.SurfaceColor,p.InkColor,p.SideColor};var customInputs=new TextBox[4];
    for(int c=0;c<4;c++){var cell=new StackPanel{Margin=new Thickness(0,0,c==3?0:8,0)};cell.Children.Add(new TextBlock{Text=customNames[c],Foreground=BrushFor("Muted"),FontSize=11,Margin=new Thickness(0,0,0,5)});customInputs[c]=new TextBox{Text=customValues[c]??"",Padding=new Thickness(5),FontSize=11,MaxLength=7,ToolTip="#RRGGBB；留空使用主题默认色"};cell.Children.Add(customInputs[c]);Grid.SetColumn(cell,c);customGrid.Children.Add(cell);}panel.Children.Add(customGrid);
+   string background=p.BackgroundImage,selectedBackground=null;
+   label("背景图片");var backgroundRow=new DockPanel();var chooseBackground=new Button{Content="选择图片",Padding=new Thickness(10,6,10,6)};var clearBackground=new Button{Content="清除",Margin=new Thickness(8,0,0,0),Padding=new Thickness(10,6,10,6)};DockPanel.SetDock(chooseBackground,Dock.Right);DockPanel.SetDock(clearBackground,Dock.Right);backgroundRow.Children.Add(clearBackground);backgroundRow.Children.Add(chooseBackground);
+   var backgroundName=new TextBlock{Text=string.IsNullOrEmpty(background)?"未设置背景":"已设置自定义背景",Foreground=BrushFor("Muted"),VerticalAlignment=VerticalAlignment.Center,TextTrimming=TextTrimming.CharacterEllipsis,Margin=new Thickness(0,0,8,0)};backgroundRow.Children.Add(backgroundName);panel.Children.Add(backgroundRow);
+   chooseBackground.Click+=(s,e)=>{var file=new Microsoft.Win32.OpenFileDialog{Title="选择背景图片",Filter="图片文件|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.webp;*.tif;*.tiff",CheckFileExists=true};if(file.ShowDialog(dialog)==true){selectedBackground=file.FileName;backgroundName.Text=Path.GetFileName(selectedBackground);}};
+   clearBackground.Click+=(s,e)=>{background=null;selectedBackground=null;backgroundName.Text="未设置背景";};
+   label("背景可见度 · 等比铺满，动图使用静态首帧");var backgroundOpacity=new Slider{Minimum=0,Maximum=100,Value=p.BackgroundOpacity,TickFrequency=5,IsSnapToTickEnabled=true};panel.Children.Add(backgroundOpacity);
    label("卡片尺寸");var size=new Slider{Minimum=120,Maximum=210,Value=p.CardSize,TickFrequency=10,IsSnapToTickEnabled=true};panel.Children.Add(size);label("卡片圆角");var radius=new Slider{Minimum=0,Maximum=26,Value=p.Radius,TickFrequency=2,IsSnapToTickEnabled=true};panel.Children.Add(radius);
    uint mods=p.Modifiers;int key=p.HotKey;label("全局快捷键 · 点击后按下新组合");var hotkey=new TextBox{Text=HotkeyText(mods,key),IsReadOnly=true,Padding=new Thickness(8)};panel.Children.Add(hotkey);hotkey.PreviewKeyDown+=(s,e)=>{e.Handled=true;Key actual=e.Key==Key.System?e.SystemKey:e.Key;if(actual==Key.LeftCtrl||actual==Key.RightCtrl||actual==Key.LeftShift||actual==Key.RightShift||actual==Key.LeftAlt||actual==Key.RightAlt||actual==Key.LWin||actual==Key.RWin)return;var m=Keyboard.Modifiers;if((m&(ModifierKeys.Control|ModifierKeys.Alt|ModifierKeys.Windows))==0){hotkey.Text="请包含 Ctrl、Alt 或 Win";return;}mods=(uint)m;key=KeyInterop.VirtualKeyFromKey(actual);hotkey.Text=HotkeyText(mods,key);};
    var startup=new CheckBox{Content="登录 Windows 后自动启动（收起至托盘）",IsChecked=Native.IsStartup(),Foreground=BrushFor("Ink"),Margin=new Thickness(0,22,0,0)};panel.Children.Add(startup);panel.Children.Add(new TextBlock{Text="所有表情仅存储在本机 · 关闭窗口后留在托盘\nGIF 保留原文件；粘贴动图效果取决于目标软件。",Foreground=BrushFor("Muted"),FontSize=11,Margin=new Thickness(0,15,0,0),TextWrapping=TextWrapping.Wrap});
    var buttons=new StackPanel{Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right,Margin=new Thickness(0,22,0,0)};var reset=new Button{Content="恢复默认",Margin=new Thickness(0,0,10,0),Padding=new Thickness(12,9,12,9)};reset.Click+=(s,e)=>{palette.SelectedIndex=0;accent.Text="#627792";size.Value=136;radius.Value=6;mods=6;key=32;hotkey.Text=HotkeyText(mods,key);};buttons.Children.Add(reset);var apply=new Button{Content="保存偏好",Padding=new Thickness(18,9,18,9),Background=BrushFor("Accent"),Foreground=Brushes.White};buttons.Children.Add(apply);panel.Children.Add(buttons);
-   reset.Click+=(s,e)=>{foreach(var input in customInputs)input.Clear();};
+   reset.Click+=(s,e)=>{foreach(var input in customInputs)input.Clear();background=null;selectedBackground=null;backgroundName.Text="未设置背景";backgroundOpacity.Value=35;};
    apply.Click+=(s,e)=>{try{string color=accent.Text.Trim();if(!System.Text.RegularExpressions.Regex.IsMatch(color,"^#[0-9a-fA-F]{6}$"))throw new Exception("强调色请使用 #437F65 这样的六位 HEX 色值。");
     foreach(var input in customInputs)if(input.Text.Trim().Length>0&&!System.Text.RegularExpressions.Regex.IsMatch(input.Text.Trim(),"^#[0-9a-fA-F]{6}$"))throw new Exception("自定义颜色请使用 #RRGGBB 格式，或留空。");
+    if(selectedBackground!=null){background=library.ImportBackground(selectedBackground);selectedBackground=null;}
     uint previousMods=p.Modifiers;int previousKey=p.HotKey;bool changed=mods!=previousMods||key!=previousKey;
     if(changed){Native.UnregisterHotKey(handle,1);if(!Native.RegisterHotKey(handle,1,mods|0x4000,(uint)key)){Native.RegisterHotKey(handle,1,previousMods|0x4000,(uint)previousKey);throw new Exception("这个快捷键已被占用，请尝试其他组合。");}}
     try{if((startup.IsChecked==true)!=p.AutoStart)Native.Startup(startup.IsChecked==true,library.Root);}catch{if(changed){Native.UnregisterHotKey(handle,1);Native.RegisterHotKey(handle,1,previousMods|0x4000,(uint)previousKey);}throw;}
-    p.Palette=(string)palette.SelectedItem;p.Accent=color;p.CanvasColor=customInputs[0].Text.Trim();p.SurfaceColor=customInputs[1].Text.Trim();p.InkColor=customInputs[2].Text.Trim();p.SideColor=customInputs[3].Text.Trim();p.CardSize=(int)size.Value;p.Radius=(int)radius.Value;p.HotKey=key;p.Modifiers=mods;p.AutoStart=startup.IsChecked==true;Save();ApplyTheme();thumbnails.Clear();Refresh();if(picker!=null&&picker.IsVisible)RefreshPicker();dialog.Close();
+    p.BackgroundImage=background;p.BackgroundOpacity=(int)backgroundOpacity.Value;p.Palette=(string)palette.SelectedItem;p.Accent=color;p.CanvasColor=customInputs[0].Text.Trim();p.SurfaceColor=customInputs[1].Text.Trim();p.InkColor=customInputs[2].Text.Trim();p.SideColor=customInputs[3].Text.Trim();p.CardSize=(int)size.Value;p.Radius=(int)radius.Value;p.HotKey=key;p.Modifiers=mods;p.AutoStart=startup.IsChecked==true;Save();ApplyTheme();thumbnails.Clear();Refresh();if(picker!=null&&picker.IsVisible)RefreshPicker();dialog.Close();
    }catch(Exception ex){MessageBox.Show(dialog,ex.Message,"无法保存偏好");}};
    dialog.Content=new ScrollViewer{Content=panel,VerticalScrollBarVisibility=ScrollBarVisibility.Auto};dialog.Show();
   }

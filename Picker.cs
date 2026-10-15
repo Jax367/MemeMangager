@@ -22,7 +22,7 @@ namespace MemeManager {
   void CreatePicker(){
    picker=new Window{Title="拾趣 · 选择表情",Icon=window.Icon,Width=604,Height=458,MinWidth=400,MinHeight=300,WindowStartupLocation=WindowStartupLocation.CenterScreen,WindowStyle=WindowStyle.ToolWindow,ResizeMode=ResizeMode.CanResizeWithGrip,ShowInTaskbar=false,Resources=window.Resources,FontFamily=window.FontFamily,FontSize=12,UseLayoutRounding=true};
    picker.SetResourceReference(Window.BackgroundProperty,"Canvas");
-   var root=new Grid{Margin=new Thickness(12,10,4,8)};root.SetResourceReference(Grid.BackgroundProperty,"Canvas");root.RowDefinitions.Add(new RowDefinition{Height=GridLength.Auto});root.RowDefinitions.Add(new RowDefinition{Height=new GridLength(1,GridUnitType.Star)});root.RowDefinitions.Add(new RowDefinition{Height=new GridLength(29)});
+   var root=new Grid{Margin=new Thickness(12,10,4,8)};root.SetResourceReference(Grid.BackgroundProperty,"Wallpaper");root.RowDefinitions.Add(new RowDefinition{Height=GridLength.Auto});root.RowDefinitions.Add(new RowDefinition{Height=new GridLength(1,GridUnitType.Star)});root.RowDefinitions.Add(new RowDefinition{Height=new GridLength(29)});
    var tools=new Grid{Margin=new Thickness(0,0,8,10)};tools.ColumnDefinitions.Add(new ColumnDefinition());tools.ColumnDefinitions.Add(new ColumnDefinition{Width=new GridLength(160)});
    var searchGrid=new Grid{Margin=new Thickness(0,0,8,0)};pickerSearch=new TextBox{ToolTip="搜索名称，Enter 复制第一张"};searchGrid.Children.Add(pickerSearch);
    var placeholder=new TextBlock{Text="⌕   搜索表情…",Margin=new Thickness(11,0,0,0),VerticalAlignment=VerticalAlignment.Center,IsHitTestVisible=false};placeholder.SetResourceReference(TextBlock.ForegroundProperty,"Muted");searchGrid.Children.Add(placeholder);tools.Children.Add(searchGrid);
@@ -37,7 +37,7 @@ namespace MemeManager {
    pickerScroll.ScrollChanged+=(s,e)=>{if(e.VerticalChange!=0||e.ViewportHeightChange!=0||e.ViewportWidthChange!=0)RenderPicker();};picker.SizeChanged+=(s,e)=>RenderPicker();
    picker.PreviewKeyDown+=(s,e)=>{if(e.Key==Key.Escape){picker.Hide();e.Handled=true;}else if(e.Key==Key.Enter&&!pickerGroups.IsDropDownOpen&&pickerItems.Count>0){Copy(pickerItems[0],picker);e.Handled=true;}};
    picker.Closing+=(s,e)=>{if(!exiting){e.Cancel=true;picker.Hide();}};
-   picker.IsVisibleChanged+=(s,e)=>{if(!picker.IsVisible){pickerSearchTimer.Stop();StopAnimations();pickerCards.Children.Clear();pickerFirst=-1;pickerEnd=-1;if(!window.IsVisible)thumbnails.Clear();releaseTimer.Stop();releaseTimer.Start();}};
+   picker.IsVisibleChanged+=(s,e)=>{UpdateWallpaper();if(!picker.IsVisible){pickerSearchTimer.Stop();StopAnimations();pickerCards.Children.Clear();pickerFirst=-1;pickerEnd=-1;if(!window.IsVisible)thumbnails.Clear();releaseTimer.Stop();releaseTimer.Start();}};
   }
   void RefreshPickerGroups(){
    string selected=pickerGroups.SelectedItem==null?"all":((PickerGroup)pickerGroups.SelectedItem).Id;

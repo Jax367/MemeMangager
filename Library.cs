@@ -9,7 +9,7 @@ using System.Windows.Media.Imaging;
 namespace MemeManager {
  public class Meme { public string Id {get;set;} public string Name {get;set;} public string Extension {get;set;} public string GroupId {get;set;} public bool Favorite {get;set;} public int Uses {get;set;} public DateTime Added {get;set;} public DateTime LastUsed {get;set;} }
  public class Group { public string Id {get;set;} public string Name {get;set;} }
- public class Preferences { public string Palette {get;set;} public string Accent {get;set;} public string CanvasColor {get;set;} public string SurfaceColor {get;set;} public string InkColor {get;set;} public string SideColor {get;set;} public int CardSize {get;set;} public int Radius {get;set;} public int HotKey {get;set;} public uint Modifiers {get;set;} public bool AutoStart {get;set;} public Preferences(){Palette="港湾雾蓝";Accent="#627792";CardSize=136;Radius=6;HotKey=32;Modifiers=6;} }
+ public class Preferences { public string Palette {get;set;} public string Accent {get;set;} public string CanvasColor {get;set;} public string SurfaceColor {get;set;} public string InkColor {get;set;} public string SideColor {get;set;} public string BackgroundImage {get;set;} public int BackgroundOpacity {get;set;} public int CardSize {get;set;} public int Radius {get;set;} public int HotKey {get;set;} public uint Modifiers {get;set;} public bool AutoStart {get;set;} public Preferences(){BackgroundOpacity=35;Palette="港湾雾蓝";Accent="#627792";CardSize=136;Radius=6;HotKey=32;Modifiers=6;} }
  public class Database { public List<Meme> Memes {get;set;} public List<Group> Groups {get;set;} public Preferences Settings {get;set;} public Database(){Memes=new List<Meme>();Groups=new List<Group>();Settings=new Preferences();} }
  public class ImportResult { public List<Meme> Items=new List<Meme>(); public int Duplicates; public int Errors; public bool Cancelled; }
  public class Library {
@@ -21,6 +21,25 @@ namespace MemeManager {
    // Update untouched defaults from the first release; preserve deliberate customization.
    var p=result.Settings;if(p.Palette=="纸间绿"&&p.Accent=="#437F65"&&p.CardSize==158&&p.Radius==12&&string.IsNullOrEmpty(p.CanvasColor)&&string.IsNullOrEmpty(p.SurfaceColor)&&string.IsNullOrEmpty(p.InkColor)&&string.IsNullOrEmpty(p.SideColor)){p.Palette="港湾雾蓝";p.Accent="#627792";p.CardSize=136;p.Radius=6;}return result;}
   public void Save(){string file=Path.Combine(Root,"library.json"),temp=file+".tmp";File.WriteAllText(temp,new JavaScriptSerializer {MaxJsonLength=int.MaxValue}.Serialize(Data));if(File.Exists(file))File.Replace(temp,file,file+".bak");else File.Move(temp,file);}
+  // Keep a bounded, static copy in the non-C library; the selected original is never modified.
+  public string ImportBackground(string file){
+   if(new FileInfo(file).Length>50L*1024*1024)throw new IOException("背景图片请小于 50 MB。");
+   BitmapImage image;
+   using(var stream=File.OpenRead(file)){
+    var decoder=BitmapDecoder.Create(stream,BitmapCreateOptions.DelayCreation,BitmapCacheOption.OnDemand);
+    int width=decoder.Frames[0].PixelWidth,height=decoder.Frames[0].PixelHeight;
+    if(width<=0||height<=0||(long)width*height>100000000)throw new IOException("背景图片尺寸过大，请先缩小图片。");
+    stream.Position=0;image=new BitmapImage();image.BeginInit();image.CacheOption=BitmapCacheOption.OnLoad;image.StreamSource=stream;
+    if(width>=height)image.DecodePixelWidth=Math.Min(1600,width);else image.DecodePixelHeight=Math.Min(1600,height);
+    image.EndInit();image.Freeze();
+   }
+   using(var encoded=new MemoryStream()){
+    var encoder=new PngBitmapEncoder();encoder.Frames.Add(BitmapFrame.Create(image));encoder.Save(encoded);
+    string name;encoded.Position=0;using(var sha=SHA256.Create())name=BitConverter.ToString(sha.ComputeHash(encoded)).Replace("-","").ToLowerInvariant()+".png";
+    string folder=Path.Combine(Root,"backgrounds");Directory.CreateDirectory(folder);string target=Path.Combine(folder,name);
+    if(!File.Exists(target)){string temp=target+".tmp";try{File.WriteAllBytes(temp,encoded.ToArray());File.Move(temp,target);}finally{if(File.Exists(temp))File.Delete(temp);}}return name;
+   }
+  }
   public string FileFor(Meme meme){return Path.Combine(Root,"images",meme.Id+meme.Extension);}
   public static bool Supported(string file){return Extensions.Contains(Path.GetExtension(file));}
   public ImportResult Import(IEnumerable<string> paths,string groupId,HashSet<string> known,System.Threading.CancellationToken token,Action<int> progress){
