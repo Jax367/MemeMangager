@@ -1,0 +1,7 @@
+dist/
+.test-data/
+data/
+data-migration-backup/
+.build-temp/
+*.user
+*.suo
