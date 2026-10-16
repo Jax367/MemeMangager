@@ -11,7 +11,7 @@ namespace MemeManager {
  public class Group { public string Id {get;set;} public string Name {get;set;} }
  public class Preferences { public string Palette {get;set;} public string Accent {get;set;} public string CanvasColor {get;set;} public string SurfaceColor {get;set;} public string InkColor {get;set;} public string SideColor {get;set;} public string BackgroundImage {get;set;} public int BackgroundOpacity {get;set;} public int CardSize {get;set;} public int Radius {get;set;} public int HotKey {get;set;} public uint Modifiers {get;set;} public bool AutoStart {get;set;} public Preferences(){BackgroundOpacity=35;Palette="港湾雾蓝";Accent="#627792";CardSize=136;Radius=6;HotKey=32;Modifiers=6;} }
  public class Database { public List<Meme> Memes {get;set;} public List<Group> Groups {get;set;} public Preferences Settings {get;set;} public Database(){Memes=new List<Meme>();Groups=new List<Group>();Settings=new Preferences();} }
- public class ImportResult { public List<Meme> Items=new List<Meme>(); public int Duplicates; public int Errors; public bool Cancelled; }
+ public class ImportResult { public List<Meme> Items=new List<Meme>(); public List<Group> Groups=new List<Group>(); public int Duplicates; public int Errors; public bool Cancelled; }
  public class Library {
   public readonly string Root; public Database Data; public string LoadWarning;
   static readonly HashSet<string> Extensions = new HashSet<string>(new[]{".gif",".png",".jpg",".jpeg",".webp",".bmp",".tif",".tiff"},StringComparer.OrdinalIgnoreCase);
@@ -42,15 +42,19 @@ namespace MemeManager {
   }
   public string FileFor(Meme meme){return Path.Combine(Root,"images",meme.Id+meme.Extension);}
   public static bool Supported(string file){return Extensions.Contains(Path.GetExtension(file));}
-  public ImportResult Import(IEnumerable<string> paths,string groupId,HashSet<string> known,System.Threading.CancellationToken token,Action<int> progress){
-   var result=new ImportResult();int scanned=0;
-   foreach(string input in paths){IEnumerable<string> files;try{files=Directory.Exists(input)?Walk(input):new[]{input};}catch{result.Errors++;continue;}
+  public ImportResult Import(IEnumerable<string> paths,string groupId,HashSet<string> known,System.Threading.CancellationToken token,Action<int> progress,bool groupByFolder=false,IEnumerable<Group> existingGroups=null){
+   var result=new ImportResult();int scanned=0;var namedGroups=new Dictionary<string,Group>(StringComparer.OrdinalIgnoreCase);if(groupByFolder)foreach(var group in existingGroups??Data.Groups)if(!namedGroups.ContainsKey(group.Name))namedGroups.Add(group.Name,group);
+   foreach(string input in paths){IEnumerable<string> files;string folderRoot=null;try{if(Directory.Exists(input)){folderRoot=Path.GetFullPath(input).TrimEnd(Path.DirectorySeparatorChar)+Path.DirectorySeparatorChar;files=Walk(input);}else files=new[]{input};}catch{result.Errors++;continue;}
     foreach(string file in files){if(token.IsCancellationRequested){result.Cancelled=true;return result;}if(!Supported(file))continue;try{
      string hash;using(var sha=SHA256.Create())using(var stream=File.OpenRead(file))hash=BitConverter.ToString(sha.ComputeHash(stream)).Replace("-","").ToLowerInvariant();
      if(known.Contains(hash)){result.Duplicates++;continue;}
      using(var stream=File.OpenRead(file)){var decoder=BitmapDecoder.Create(stream,BitmapCreateOptions.DelayCreation,BitmapCacheOption.OnLoad);if(decoder.Frames.Count==0||decoder.Frames[0].PixelWidth==0)throw new InvalidDataException();}
      var item=new Meme{Id=hash,Name=Path.GetFileNameWithoutExtension(file),Extension=Path.GetExtension(file).ToLowerInvariant(),GroupId=groupId,Added=DateTime.Now};
-     string target=FileFor(item);if(!File.Exists(target))File.Copy(file,target);known.Add(hash);result.Items.Add(item);
+     string target=FileFor(item);if(!File.Exists(target))File.Copy(file,target);
+     if(groupByFolder&&folderRoot!=null){string parent=Path.GetDirectoryName(Path.GetFullPath(file)).TrimEnd(Path.DirectorySeparatorChar)+Path.DirectorySeparatorChar;
+      if(!string.Equals(parent,folderRoot,StringComparison.OrdinalIgnoreCase)){string name=new DirectoryInfo(Path.GetDirectoryName(Path.GetFullPath(file))).Name;Group group;if(!namedGroups.TryGetValue(name,out group)){group=new Group{Id=Guid.NewGuid().ToString("N"),Name=name};namedGroups.Add(name,group);result.Groups.Add(group);}item.GroupId=group.Id;}
+     }
+     known.Add(hash);result.Items.Add(item);
     }catch{result.Errors++;}finally{scanned++;if(scanned%10==0)progress(scanned);}}
    }return result;
   }

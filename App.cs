@@ -157,12 +157,30 @@ namespace MemeManager {
    }catch(Exception ex){MessageBox.Show(window,ex.Message,"无法从剪贴板添加",MessageBoxButton.OK,MessageBoxImage.Warning);}
    finally{readingClipboard=false;Find<Button>("ImportClipboard").IsEnabled=!importing;}
   }
-  async void BeginImport(string[] paths){await ImportPathsAsync(paths);}
-  async Task ImportPathsAsync(string[] paths){if(importing){MessageBox.Show(window,"当前导入尚未完成，请稍候。","正在导入");return;}importing=true;importCancellation=new CancellationTokenSource();Find<Button>("ImportClipboard").IsEnabled=false;Find<Button>("ImportFiles").IsEnabled=false;Find<Button>("ImportFolder").IsEnabled=false;
+  Window CreateFolderImportDialog(string[] paths){
+   var dialog=Dialog("导入文件夹",490,320);NameScope.SetNameScope(dialog,new NameScope());var panel=new StackPanel{Margin=new Thickness(24)};
+   panel.Children.Add(new TextBlock{Text="文件夹导入方式",FontSize=18,FontWeight=FontWeights.SemiBold,Foreground=BrushFor("Ink"),Margin=new Thickness(0,0,0,12)});
+   panel.Children.Add(new TextBlock{Text=paths.Length==1?paths[0]:"已选择 "+paths.Length+" 个文件或文件夹",Foreground=BrushFor("Muted"),TextTrimming=TextTrimming.CharacterEllipsis,Margin=new Thickness(0,0,0,20)});
+   var grouping=new CheckBox{Name="FolderGrouping",Content="按子文件夹名称自动分组",IsChecked=false,Foreground=BrushFor("Ink")};dialog.RegisterName(grouping.Name,grouping);panel.Children.Add(grouping);
+   panel.Children.Add(new TextBlock{Text="开启：使用图片直接所在的子文件夹名称，同名分组会复用。根目录图片仍导入当前分组。\n关闭：所有图片统一导入当前分组。\n重复图片会跳过，空目录不会创建分组。",TextWrapping=TextWrapping.Wrap,Foreground=BrushFor("Muted"),FontSize=11,Margin=new Thickness(0,12,0,0)});
+   var buttons=new StackPanel{Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right,Margin=new Thickness(0,22,0,0)};var cancel=new Button{Content="取消",IsCancel=true,Margin=new Thickness(0,0,8,0)};var start=new Button{Content="开始导入",IsDefault=true,Background=BrushFor("Accent"),Foreground=Brushes.White};start.Click+=(s,e)=>dialog.DialogResult=true;buttons.Children.Add(cancel);buttons.Children.Add(start);panel.Children.Add(buttons);dialog.Content=panel;return dialog;
+  }
+  async void BeginImport(string[] paths){
+   if(importing){status.Text="当前导入尚未完成，请稍候。";return;}bool groupByFolder=false;
+   if(paths.Any(Directory.Exists)){var options=CreateFolderImportDialog(paths);if(options.ShowDialog()!=true)return;groupByFolder=((CheckBox)options.FindName("FolderGrouping")).IsChecked==true;}
+   await ImportPathsAsync(paths,groupByFolder);
+  }
+  async Task ImportPathsAsync(string[] paths,bool groupByFolder=false){if(importing){MessageBox.Show(window,"当前导入尚未完成，请稍候。","正在导入");return;}importing=true;importCancellation=new CancellationTokenSource();Find<Button>("ImportClipboard").IsEnabled=false;Find<Button>("ImportFiles").IsEnabled=false;Find<Button>("ImportFolder").IsEnabled=false;
    var progress=Dialog("收集快乐",390,210);var panel=new StackPanel{Margin=new Thickness(25)};var message=new TextBlock{Text="正在导入图片，包含子文件夹…",Foreground=BrushFor("Ink"),Margin=new Thickness(0,0,0,20)};panel.Children.Add(message);panel.Children.Add(new ProgressBar{IsIndeterminate=true,Height=5});var cancel=new Button{Content="取消导入",Margin=new Thickness(0,20,0,0)};cancel.Click+=(s,e)=>{importCancellation.Cancel();cancel.IsEnabled=false;message.Text="正在完成当前文件…";};panel.Children.Add(cancel);progress.Content=panel;progress.Closing+=(s,e)=>{if(importing){e.Cancel=true;importCancellation.Cancel();}};progress.Show();
-   try{string groupId=library.Data.Groups.Any(x=>x.Id==filter)?filter:null;var known=new HashSet<string>(library.Data.Memes.Select(x=>x.Id));var result=await Task.Run(()=>library.Import(paths,groupId,known,importCancellation.Token,n=>window.Dispatcher.BeginInvoke(new Action(()=>message.Text="已检查 "+n+" 张图片…"))));
-    library.Data.Memes.AddRange(result.Items);Save();RefreshNavigation();Refresh();status.Text=string.Format("{0}导入 {1} 张 · 重复 {2} 张 · 无法读取 {3} 张",result.Cancelled?"已取消，已保留 ":"已",result.Items.Count,result.Duplicates,result.Errors);
+   try{string groupId=library.Data.Groups.Any(x=>x.Id==filter)?filter:null;var known=new HashSet<string>(library.Data.Memes.Select(x=>x.Id));var groupSnapshot=library.Data.Groups.Select(x=>new Group{Id=x.Id,Name=x.Name}).ToList();var result=await Task.Run(()=>library.Import(paths,groupId,known,importCancellation.Token,n=>window.Dispatcher.BeginInvoke(new Action(()=>message.Text="已检查 "+n+" 张图片…")),groupByFolder,groupSnapshot));
+    CommitImported(result);RefreshNavigation();Refresh();status.Text=string.Format("{0}导入 {1} 张 · 重复 {2} 张 · 无法读取 {3} 张",result.Cancelled?"已取消，已保留 ":"已",result.Items.Count,result.Duplicates,result.Errors);
    }catch(Exception ex){Report(ex);}finally{importing=false;progress.Close();importCancellation.Dispose();Find<Button>("ImportClipboard").IsEnabled=!readingClipboard;Find<Button>("ImportFiles").IsEnabled=true;Find<Button>("ImportFolder").IsEnabled=true;ProcessPendingImports();}}
+  void CommitImported(ImportResult result){
+   var addedGroups=new List<Group>();var remap=new Dictionary<string,string>();
+   foreach(var group in result.Groups){var current=library.Data.Groups.FirstOrDefault(x=>string.Equals(x.Name,group.Name,StringComparison.OrdinalIgnoreCase));if(current!=null)remap[group.Id]=current.Id;else{library.Data.Groups.Add(group);addedGroups.Add(group);}}
+   var ids=new HashSet<string>(library.Data.Groups.Select(x=>x.Id));foreach(var item in result.Items){string mapped;if(item.GroupId!=null&&remap.TryGetValue(item.GroupId,out mapped))item.GroupId=mapped;if(item.GroupId!=null&&!ids.Contains(item.GroupId))item.GroupId=null;}
+   library.Data.Memes.AddRange(result.Items);try{Save();}catch{foreach(var item in result.Items)library.Data.Memes.Remove(item);foreach(var group in addedGroups)library.Data.Groups.Remove(group);throw;}
+  }
   void NewGroup(){string name=Prompt("新建分组","把同一种快乐放在一起","");if(name==null)return;var group=new Group{Id=Guid.NewGuid().ToString("N"),Name=name};library.Data.Groups.Add(group);Save();filter=group.Id;RefreshNavigation();Refresh();}
   void RenameGroup(Group group){string name=Prompt("重命名分组","分组名称",group.Name);if(name!=null){group.Name=name;Save();RefreshNavigation();Refresh();}}
   void RemoveGroup(Group group){if(MessageBox.Show(window,"删除「"+group.Name+"」分组？其中的表情将移至未分组。","删除分组",MessageBoxButton.YesNo)!=MessageBoxResult.Yes)return;foreach(var item in library.Data.Memes.Where(x=>x.GroupId==group.Id))item.GroupId=null;library.Data.Groups.Remove(group);if(filter==group.Id)filter="all";Save();RefreshNavigation();Refresh();}
