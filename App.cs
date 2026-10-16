@@ -34,7 +34,7 @@ namespace MemeManager {
    groups.SelectionChanged+=(s,e)=>{if(rebuilding||groups.SelectedItem==null)return;filter=(string)((ListBoxItem)groups.SelectedItem).Tag;rebuilding=true;navigation.SelectedIndex=-1;rebuilding=false;Refresh();};
    searchTimer=new DispatcherTimer {Interval=TimeSpan.FromMilliseconds(180)};searchTimer.Tick+=(s,e)=>{searchTimer.Stop();Refresh();};
    search.TextChanged+=(s,e)=>{Find<TextBlock>("SearchHint").Visibility=search.Text.Length==0?Visibility.Visible:Visibility.Collapsed;searchTimer.Stop();searchTimer.Start();};sort.SelectionChanged+=(s,e)=>Refresh();
-   Click("ImportFiles",(s,e)=>ChooseFiles());Click("EmptyImport",(s,e)=>ChooseFiles());Click("ImportFolder",(s,e)=>ChooseFolder());Click("AddGroup",(s,e)=>NewGroup());Click("SettingsButton",(s,e)=>Settings());Click("OpenPicker",(s,e)=>ShowPicker());Click("PreprocessButton",(s,e)=>ShowPreprocessor());Click("BatchToggle",(s,e)=>ToggleBatchMode());Click("BatchSelectAll",(s,e)=>{foreach(var item in visible)batchSelected.Add(item.Id);UpdateBatchUI();RedrawBatchCards();});Click("BatchClear",(s,e)=>{batchSelected.Clear();UpdateBatchUI();RedrawBatchCards();});Click("BatchMove",(s,e)=>{try{var target=Find<ComboBox>("BatchGroup").SelectedItem as PickerGroup;if(target!=null)MoveBatch(target.Id);}catch(Exception ex){Report(ex);}});UpdateBatchUI();
+   Click("ImportClipboard",(s,e)=>AddFromClipboard());Click("ImportFiles",(s,e)=>ChooseFiles());Click("EmptyImport",(s,e)=>ChooseFiles());Click("ImportFolder",(s,e)=>ChooseFolder());Click("AddGroup",(s,e)=>NewGroup());Click("SettingsButton",(s,e)=>Settings());Click("OpenPicker",(s,e)=>ShowPicker());Click("PreprocessButton",(s,e)=>ShowPreprocessor());Click("BatchToggle",(s,e)=>ToggleBatchMode());Click("BatchSelectAll",(s,e)=>{foreach(var item in visible)batchSelected.Add(item.Id);UpdateBatchUI();RedrawBatchCards();});Click("BatchClear",(s,e)=>{batchSelected.Clear();UpdateBatchUI();RedrawBatchCards();});Click("BatchMove",(s,e)=>{try{var target=Find<ComboBox>("BatchGroup").SelectedItem as PickerGroup;if(target!=null)MoveBatch(target.Id);}catch(Exception ex){Report(ex);}});UpdateBatchUI();
    window.Drop+=(s,e)=>{if(e.Data.GetDataPresent(DataFormats.FileDrop))BeginImport((string[])e.Data.GetData(DataFormats.FileDrop));};
    window.PreviewDragOver+=(s,e)=>{e.Effects=e.Data.GetDataPresent(DataFormats.FileDrop)?DragDropEffects.Copy:DragDropEffects.None;e.Handled=true;};
    window.PreviewKeyDown+=(s,e)=>{if(e.Key==Key.Escape){window.Hide();e.Handled=true;}};
@@ -144,11 +144,25 @@ namespace MemeManager {
   void CompleteCopy(Meme meme,Window origin){meme.Uses++;meme.LastUsed=DateTime.Now;Save();origin.Hide();RefreshNavigation();Refresh();}
   void ChooseFiles(){var dialog=new Microsoft.Win32.OpenFileDialog{Title="添加表情",Multiselect=true,Filter="图片与动图|*.gif;*.png;*.jpg;*.jpeg;*.bmp;*.tif;*.tiff;*.webp|所有文件|*.*"};if(dialog.ShowDialog(window)==true)BeginImport(dialog.FileNames);}
   void ChooseFolder(){try{string path=Native.PickFolder(handle);if(path!=null)BeginImport(new[]{path});}catch(Exception ex){Report(ex);}}
-  async void BeginImport(string[] paths){if(importing){MessageBox.Show(window,"当前导入尚未完成，请稍候。","正在导入");return;}importing=true;importCancellation=new CancellationTokenSource();Find<Button>("ImportFiles").IsEnabled=false;Find<Button>("ImportFolder").IsEnabled=false;
+  bool readingClipboard;
+  async void AddFromClipboard(){
+   if(importing||readingClipboard){status.Text="当前导入尚未完成，请稍候。";return;}
+   readingClipboard=true;Find<Button>("ImportClipboard").IsEnabled=false;
+   try{
+    IDataObject data=null;for(int attempt=0;attempt<4;attempt++){try{data=Clipboard.GetDataObject();break;}catch(System.Runtime.InteropServices.COMException){if(attempt==3)throw;}await Task.Delay(60);}
+    using(var prepared=ClipboardImages.Prepare(data,library.Root)){
+     if(prepared.Paths.Length==0){status.Text="剪贴板中没有可导入的图片，请先复制图片或图片文件。";return;}
+     await ImportPathsAsync(prepared.Paths);
+    }
+   }catch(Exception ex){MessageBox.Show(window,ex.Message,"无法从剪贴板添加",MessageBoxButton.OK,MessageBoxImage.Warning);}
+   finally{readingClipboard=false;Find<Button>("ImportClipboard").IsEnabled=!importing;}
+  }
+  async void BeginImport(string[] paths){await ImportPathsAsync(paths);}
+  async Task ImportPathsAsync(string[] paths){if(importing){MessageBox.Show(window,"当前导入尚未完成，请稍候。","正在导入");return;}importing=true;importCancellation=new CancellationTokenSource();Find<Button>("ImportClipboard").IsEnabled=false;Find<Button>("ImportFiles").IsEnabled=false;Find<Button>("ImportFolder").IsEnabled=false;
    var progress=Dialog("收集快乐",390,210);var panel=new StackPanel{Margin=new Thickness(25)};var message=new TextBlock{Text="正在导入图片，包含子文件夹…",Foreground=BrushFor("Ink"),Margin=new Thickness(0,0,0,20)};panel.Children.Add(message);panel.Children.Add(new ProgressBar{IsIndeterminate=true,Height=5});var cancel=new Button{Content="取消导入",Margin=new Thickness(0,20,0,0)};cancel.Click+=(s,e)=>{importCancellation.Cancel();cancel.IsEnabled=false;message.Text="正在完成当前文件…";};panel.Children.Add(cancel);progress.Content=panel;progress.Closing+=(s,e)=>{if(importing){e.Cancel=true;importCancellation.Cancel();}};progress.Show();
    try{string groupId=library.Data.Groups.Any(x=>x.Id==filter)?filter:null;var known=new HashSet<string>(library.Data.Memes.Select(x=>x.Id));var result=await Task.Run(()=>library.Import(paths,groupId,known,importCancellation.Token,n=>window.Dispatcher.BeginInvoke(new Action(()=>message.Text="已检查 "+n+" 张图片…"))));
     library.Data.Memes.AddRange(result.Items);Save();RefreshNavigation();Refresh();status.Text=string.Format("{0}导入 {1} 张 · 重复 {2} 张 · 无法读取 {3} 张",result.Cancelled?"已取消，已保留 ":"已",result.Items.Count,result.Duplicates,result.Errors);
-   }catch(Exception ex){Report(ex);}finally{importing=false;progress.Close();importCancellation.Dispose();Find<Button>("ImportFiles").IsEnabled=true;Find<Button>("ImportFolder").IsEnabled=true;ProcessPendingImports();}}
+   }catch(Exception ex){Report(ex);}finally{importing=false;progress.Close();importCancellation.Dispose();Find<Button>("ImportClipboard").IsEnabled=!readingClipboard;Find<Button>("ImportFiles").IsEnabled=true;Find<Button>("ImportFolder").IsEnabled=true;ProcessPendingImports();}}
   void NewGroup(){string name=Prompt("新建分组","把同一种快乐放在一起","");if(name==null)return;var group=new Group{Id=Guid.NewGuid().ToString("N"),Name=name};library.Data.Groups.Add(group);Save();filter=group.Id;RefreshNavigation();Refresh();}
   void RenameGroup(Group group){string name=Prompt("重命名分组","分组名称",group.Name);if(name!=null){group.Name=name;Save();RefreshNavigation();Refresh();}}
   void RemoveGroup(Group group){if(MessageBox.Show(window,"删除「"+group.Name+"」分组？其中的表情将移至未分组。","删除分组",MessageBoxButton.YesNo)!=MessageBoxResult.Yes)return;foreach(var item in library.Data.Memes.Where(x=>x.GroupId==group.Id))item.GroupId=null;library.Data.Groups.Remove(group);if(filter==group.Id)filter="all";Save();RefreshNavigation();Refresh();}

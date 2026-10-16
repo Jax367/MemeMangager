@@ -27,7 +27,7 @@ namespace MemeManager {
   bool processingImportRequests;
   void ProcessPendingImports(){window.Dispatcher.BeginInvoke(new Action(ProcessPendingImportsCore));}
   async void ProcessPendingImportsCore(){
-   if(processingImportRequests||importing)return;processingImportRequests=true;importing=true;Find<System.Windows.Controls.Button>("ImportFiles").IsEnabled=false;Find<System.Windows.Controls.Button>("ImportFolder").IsEnabled=false;
+   if(processingImportRequests||importing)return;processingImportRequests=true;importing=true;Find<System.Windows.Controls.Button>("ImportClipboard").IsEnabled=false;Find<System.Windows.Controls.Button>("ImportFiles").IsEnabled=false;Find<System.Windows.Controls.Button>("ImportFolder").IsEnabled=false;
    try{ProcessedImportRequest request;while((request=ImportBridge.Next(library.Root))!=null){var response=new ProcessedImportResponse();var added=new List<Meme>();try{
      string group=library.Data.Groups.Any(g=>g.Id==request.GroupId)?request.GroupId:null;
      string[] files=request.Files.Where(p=>!string.IsNullOrWhiteSpace(p)&&Path.IsPathRooted(p)&&!Directory.Exists(p)&&Library.Supported(p)).ToArray();response.Failed=request.Files.Length-files.Length;
@@ -38,7 +38,7 @@ namespace MemeManager {
      RefreshNavigation();Refresh();if(picker!=null&&picker.IsVisible)RefreshPicker();status.Text="预处理结果：已导入 "+response.Imported+" 张 · 重复 "+response.Duplicates+" 张 · 失败 "+response.Failed+" 张";
     }catch(Exception ex){response.Error=ex.Message;}ImportBridge.Complete(library.Root,request.Id,response);}
    }catch(Exception ex){status.Text="预处理结果导入失败："+ex.Message;}
-   finally{processingImportRequests=false;importing=false;Find<System.Windows.Controls.Button>("ImportFiles").IsEnabled=true;Find<System.Windows.Controls.Button>("ImportFolder").IsEnabled=true;}
+   finally{processingImportRequests=false;importing=false;Find<System.Windows.Controls.Button>("ImportClipboard").IsEnabled=!readingClipboard;Find<System.Windows.Controls.Button>("ImportFiles").IsEnabled=true;Find<System.Windows.Controls.Button>("ImportFolder").IsEnabled=true;}
   }
  }
 }
