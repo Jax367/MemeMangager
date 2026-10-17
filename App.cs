@@ -34,7 +34,7 @@ namespace MemeManager {
    groups.SelectionChanged+=(s,e)=>{if(rebuilding||groups.SelectedItem==null)return;filter=(string)((ListBoxItem)groups.SelectedItem).Tag;rebuilding=true;navigation.SelectedIndex=-1;rebuilding=false;Refresh();};
    searchTimer=new DispatcherTimer {Interval=TimeSpan.FromMilliseconds(180)};searchTimer.Tick+=(s,e)=>{searchTimer.Stop();Refresh();};
    search.TextChanged+=(s,e)=>{Find<TextBlock>("SearchHint").Visibility=search.Text.Length==0?Visibility.Visible:Visibility.Collapsed;searchTimer.Stop();searchTimer.Start();};sort.SelectionChanged+=(s,e)=>Refresh();
-   Click("ImportClipboard",(s,e)=>AddFromClipboard());Click("ImportFiles",(s,e)=>ChooseFiles());Click("EmptyImport",(s,e)=>ChooseFiles());Click("ImportFolder",(s,e)=>ChooseFolder());Click("AddGroup",(s,e)=>NewGroup());Click("SettingsButton",(s,e)=>Settings());Click("OpenPicker",(s,e)=>ShowPicker());Click("PreprocessButton",(s,e)=>ShowPreprocessor());Click("BatchToggle",(s,e)=>ToggleBatchMode());Click("BatchSelectAll",(s,e)=>{foreach(var item in visible)batchSelected.Add(item.Id);UpdateBatchUI();RedrawBatchCards();});Click("BatchClear",(s,e)=>{batchSelected.Clear();UpdateBatchUI();RedrawBatchCards();});Click("BatchMove",(s,e)=>{try{var target=Find<ComboBox>("BatchGroup").SelectedItem as PickerGroup;if(target!=null)MoveBatch(target.Id);}catch(Exception ex){Report(ex);}});UpdateBatchUI();
+   Click("ImportClipboard",(s,e)=>AddFromClipboard());Click("ImportFiles",(s,e)=>ChooseFiles());Click("EmptyImport",(s,e)=>ChooseFiles());Click("ImportFolder",(s,e)=>ChooseFolder());Click("AddGroup",(s,e)=>NewGroup());Click("SettingsButton",(s,e)=>Settings());Click("OpenPicker",(s,e)=>ShowPicker());Click("PreprocessButton",(s,e)=>ShowPreprocessor());Click("BatchToggle",(s,e)=>ToggleBatchMode());Click("BatchSelectAll",(s,e)=>{foreach(var item in visible)batchSelected.Add(item.Id);UpdateBatchUI();RedrawBatchCards();});Click("BatchClear",(s,e)=>{batchSelected.Clear();UpdateBatchUI();RedrawBatchCards();});Click("BatchMove",(s,e)=>{try{var target=Find<ComboBox>("BatchGroup").SelectedItem as PickerGroup;if(target!=null)MoveBatch(target.Id);}catch(Exception ex){Report(ex);}});UpdateBatchUI();SetupFolderImportSettings();
    window.Drop+=(s,e)=>{if(e.Data.GetDataPresent(DataFormats.FileDrop))BeginImport((string[])e.Data.GetData(DataFormats.FileDrop));};
    window.PreviewDragOver+=(s,e)=>{e.Effects=e.Data.GetDataPresent(DataFormats.FileDrop)?DragDropEffects.Copy:DragDropEffects.None;e.Handled=true;};
    window.PreviewKeyDown+=(s,e)=>{if(e.Key==Key.Escape){window.Hide();e.Handled=true;}};
@@ -157,18 +157,16 @@ namespace MemeManager {
    }catch(Exception ex){MessageBox.Show(window,ex.Message,"无法从剪贴板添加",MessageBoxButton.OK,MessageBoxImage.Warning);}
    finally{readingClipboard=false;Find<Button>("ImportClipboard").IsEnabled=!importing;}
   }
-  Window CreateFolderImportDialog(string[] paths){
-   var dialog=Dialog("导入文件夹",490,320);NameScope.SetNameScope(dialog,new NameScope());var panel=new StackPanel{Margin=new Thickness(24)};
-   panel.Children.Add(new TextBlock{Text="文件夹导入方式",FontSize=18,FontWeight=FontWeights.SemiBold,Foreground=BrushFor("Ink"),Margin=new Thickness(0,0,0,12)});
-   panel.Children.Add(new TextBlock{Text=paths.Length==1?paths[0]:"已选择 "+paths.Length+" 个文件或文件夹",Foreground=BrushFor("Muted"),TextTrimming=TextTrimming.CharacterEllipsis,Margin=new Thickness(0,0,0,20)});
-   var grouping=new CheckBox{Name="FolderGrouping",Content="按子文件夹名称自动分组",IsChecked=false,Foreground=BrushFor("Ink")};dialog.RegisterName(grouping.Name,grouping);panel.Children.Add(grouping);
-   panel.Children.Add(new TextBlock{Text="开启：使用图片直接所在的子文件夹名称，同名分组会复用。根目录图片仍导入当前分组。\n关闭：所有图片统一导入当前分组。\n重复图片会跳过，空目录不会创建分组。",TextWrapping=TextWrapping.Wrap,Foreground=BrushFor("Muted"),FontSize=11,Margin=new Thickness(0,12,0,0)});
-   var buttons=new StackPanel{Orientation=Orientation.Horizontal,HorizontalAlignment=HorizontalAlignment.Right,Margin=new Thickness(0,22,0,0)};var cancel=new Button{Content="取消",IsCancel=true,Margin=new Thickness(0,0,8,0)};var start=new Button{Content="开始导入",IsDefault=true,Background=BrushFor("Accent"),Foreground=Brushes.White};start.Click+=(s,e)=>dialog.DialogResult=true;buttons.Children.Add(cancel);buttons.Children.Add(start);panel.Children.Add(buttons);dialog.Content=panel;return dialog;
+  void SetupFolderImportSettings(){
+   var button=Find<Button>("FolderImportSettings");var menu=new ContextMenu{Background=BrushFor("Surface"),Foreground=BrushFor("Ink"),BorderBrush=BrushFor("Line")};
+   var grouping=new MenuItem{Header="按子文件夹名称自动分组",IsCheckable=true,IsChecked=library.Data.Settings.FolderAutoGroup};
+   Action update=()=>{button.ToolTip=grouping.IsChecked?"文件夹导入设置：自动分组已开启":"文件夹导入设置：自动分组已关闭";button.SetResourceReference(Button.BackgroundProperty,grouping.IsChecked?"Tint":"Surface");};
+   grouping.Click+=(s,e)=>{bool before=library.Data.Settings.FolderAutoGroup;try{library.Data.Settings.FolderAutoGroup=grouping.IsChecked;library.Save();}catch(Exception ex){library.Data.Settings.FolderAutoGroup=before;grouping.IsChecked=before;Report(ex);}update();};menu.Items.Add(grouping);button.ContextMenu=menu;
+   button.Click+=(s,e)=>{menu.PlacementTarget=button;menu.Placement=System.Windows.Controls.Primitives.PlacementMode.Bottom;menu.IsOpen=true;};update();
   }
   async void BeginImport(string[] paths){
-   if(importing){status.Text="当前导入尚未完成，请稍候。";return;}bool groupByFolder=false;
-   if(paths.Any(Directory.Exists)){var options=CreateFolderImportDialog(paths);if(options.ShowDialog()!=true)return;groupByFolder=((CheckBox)options.FindName("FolderGrouping")).IsChecked==true;}
-   await ImportPathsAsync(paths,groupByFolder);
+   if(importing){status.Text="当前导入尚未完成，请稍候。";return;}
+   await ImportPathsAsync(paths,library.Data.Settings.FolderAutoGroup&&paths.Any(Directory.Exists));
   }
   async Task ImportPathsAsync(string[] paths,bool groupByFolder=false){if(importing){MessageBox.Show(window,"当前导入尚未完成，请稍候。","正在导入");return;}importing=true;importCancellation=new CancellationTokenSource();Find<Button>("ImportClipboard").IsEnabled=false;Find<Button>("ImportFiles").IsEnabled=false;Find<Button>("ImportFolder").IsEnabled=false;
    var progress=Dialog("收集快乐",390,210);var panel=new StackPanel{Margin=new Thickness(25)};var message=new TextBlock{Text="正在导入图片，包含子文件夹…",Foreground=BrushFor("Ink"),Margin=new Thickness(0,0,0,20)};panel.Children.Add(message);panel.Children.Add(new ProgressBar{IsIndeterminate=true,Height=5});var cancel=new Button{Content="取消导入",Margin=new Thickness(0,20,0,0)};cancel.Click+=(s,e)=>{importCancellation.Cancel();cancel.IsEnabled=false;message.Text="正在完成当前文件…";};panel.Children.Add(cancel);progress.Content=panel;progress.Closing+=(s,e)=>{if(importing){e.Cancel=true;importCancellation.Cancel();}};progress.Show();
