@@ -32,10 +32,10 @@ namespace MemeManager {
      string group=library.Data.Groups.Any(g=>g.Id==request.GroupId)?request.GroupId:null;
      string[] files=request.Files.Where(p=>!string.IsNullOrWhiteSpace(p)&&Path.IsPathRooted(p)&&!Directory.Exists(p)&&Library.Supported(p)).ToArray();response.Failed=request.Files.Length-files.Length;
      status.Text="正在导入预处理结果…";var known=new HashSet<string>(library.Data.Memes.Select(x=>x.Id));var result=await Task.Run(()=>library.Import(files,group,known,CancellationToken.None,n=>{}));
-     if(group!=null&&!library.Data.Groups.Any(g=>g.Id==group))foreach(var item in result.Items)item.GroupId=null;
-     added=result.Items;library.Data.Memes.AddRange(added);try{if(added.Count>0)Save();}catch{foreach(var item in added)library.Data.Memes.Remove(item);throw;}
+     if(group!=null&&!library.Data.Groups.Any(g=>g.Id==group)){foreach(var item in result.Items)Grouping.Set(item,new string[0]);result.Memberships.Clear();}
+     added=result.Items;CommitImported(result);
      response.Imported=added.Count;response.Duplicates=result.Duplicates;response.Failed+=result.Errors;
-     RefreshNavigation();Refresh();if(picker!=null&&picker.IsVisible)RefreshPicker();status.Text="预处理结果：已导入 "+response.Imported+" 张 · 重复 "+response.Duplicates+" 张 · 失败 "+response.Failed+" 张";
+     RefreshNavigation();Refresh();if(picker!=null&&picker.IsVisible)RefreshPicker();status.Text="预处理结果：已导入 "+response.Imported+" 张 · 复用 "+response.Duplicates+" 张 · 失败 "+response.Failed+" 张";
     }catch(Exception ex){response.Error=ex.Message;}ImportBridge.Complete(library.Root,request.Id,response);}
    }catch(Exception ex){status.Text="预处理结果导入失败："+ex.Message;}
    finally{processingImportRequests=false;importing=false;Find<System.Windows.Controls.Button>("ImportClipboard").IsEnabled=!readingClipboard;Find<System.Windows.Controls.Button>("ImportFiles").IsEnabled=true;Find<System.Windows.Controls.Button>("ImportFolder").IsEnabled=true;}

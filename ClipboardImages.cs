@@ -10,6 +10,7 @@ namespace MemeManager {
   public string[] Paths {get;private set;} string staging;
   const int Limit=50*1024*1024;
   ClipboardImages(){Paths=new string[0];}
+  public static bool HasImages(IDataObject data){if(data==null)return false;if(data.GetDataPresent(DataFormats.Bitmap,true))return true;foreach(string format in new[]{"GIF","image/gif","PNG","image/png"})if(data.GetDataPresent(format,false))return true;if(data.GetDataPresent(DataFormats.FileDrop)){var files=data.GetData(DataFormats.FileDrop) as string[];if(files!=null)return files.Any(p=>!string.IsNullOrEmpty(p)&&File.Exists(p)&&Library.Supported(p));}return false;}
   public static ClipboardImages Prepare(IDataObject data,string root){
    var result=new ClipboardImages();if(data==null)return result;
    try{

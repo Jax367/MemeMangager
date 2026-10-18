@@ -7,17 +7,21 @@ using System.Web.Script.Serialization;
 using System.Windows.Media.Imaging;
 
 namespace MemeManager {
- public class Meme { public string Id {get;set;} public string Name {get;set;} public string Extension {get;set;} public string GroupId {get;set;} public bool Favorite {get;set;} public int Uses {get;set;} public DateTime Added {get;set;} public DateTime LastUsed {get;set;} }
- public class Group { public string Id {get;set;} public string Name {get;set;} }
- public class Preferences { public string Palette {get;set;} public string Accent {get;set;} public string CanvasColor {get;set;} public string SurfaceColor {get;set;} public string InkColor {get;set;} public string SideColor {get;set;} public string BackgroundImage {get;set;} public int BackgroundOpacity {get;set;} public int CardSize {get;set;} public int Radius {get;set;} public int HotKey {get;set;} public uint Modifiers {get;set;} public bool AutoStart {get;set;} public bool FolderAutoGroup {get;set;} public Preferences(){BackgroundOpacity=35;Palette="港湾雾蓝";Accent="#627792";CardSize=136;Radius=6;HotKey=32;Modifiers=6;} }
+ public class Meme { public string Id {get;set;} public string Name {get;set;} public string Extension {get;set;} List<string> memberships=new List<string>();bool explicitMemberships;
+  // GroupId reads the first membership for older consumers; an explicit list wins in any JSON property order.
+  public string GroupId {get{return memberships.FirstOrDefault();}set{if(!explicitMemberships)memberships=string.IsNullOrEmpty(value)?new List<string>():new List<string>{value};}}
+  public List<string> GroupIds {get{return memberships;}set{explicitMemberships=true;memberships=(value??new List<string>()).Where(x=>!string.IsNullOrEmpty(x)).Distinct().ToList();}} public bool Favorite {get;set;} public int Uses {get;set;} public DateTime Added {get;set;} public DateTime LastUsed {get;set;} }
+ public class Group { public string Id {get;set;} public string Name {get;set;} public string ParentId {get;set;} }
+ public class Preferences { public string Palette {get;set;} public string Accent {get;set;} public string CanvasColor {get;set;} public string SurfaceColor {get;set;} public string InkColor {get;set;} public string SideColor {get;set;} public string BackgroundImage {get;set;} public int BackgroundOpacity {get;set;} public int CardSize {get;set;} public int Radius {get;set;} public int HotKey {get;set;} public uint Modifiers {get;set;} public bool AutoStart {get;set;} public bool FolderAutoGroup {get;set;} public bool ManagerTopmost {get;set;} public bool PickerTopmost {get;set;} public Preferences(){BackgroundOpacity=35;Palette="港湾雾蓝";Accent="#627792";CardSize=136;Radius=6;HotKey=32;Modifiers=6;} }
  public class Database { public List<Meme> Memes {get;set;} public List<Group> Groups {get;set;} public Preferences Settings {get;set;} public Database(){Memes=new List<Meme>();Groups=new List<Group>();Settings=new Preferences();} }
- public class ImportResult { public List<Meme> Items=new List<Meme>(); public List<Group> Groups=new List<Group>(); public int Duplicates; public int Errors; public bool Cancelled; }
+ public class ImportResult { public List<Meme> Items=new List<Meme>(); public List<Group> Groups=new List<Group>(); public Dictionary<string,List<string>> Memberships=new Dictionary<string,List<string>>(); public int Duplicates; public int Errors; public bool Cancelled; }
  public class Library {
   public readonly string Root; public Database Data; public string LoadWarning;
   static readonly HashSet<string> Extensions = new HashSet<string>(new[]{".gif",".png",".jpg",".jpeg",".webp",".bmp",".tif",".tiff"},StringComparer.OrdinalIgnoreCase);
   public Library(string root){Root=StoragePaths.RequireNonC(root);Directory.CreateDirectory(Path.Combine(Root,"images"));Data=Load();}
   Database Load(){string file=Path.Combine(Root,"library.json");if(!File.Exists(file))return new Database();try{return Deserialize(file);}catch{try{var recovered=Deserialize(file+".bak");LoadWarning="资料库已从备份恢复。";return recovered;}catch{throw new InvalidDataException("资料库与备份无法读取。为保护原数据，程序已停止。请备份后检查："+file);}}}
   Database Deserialize(string file){var result=new JavaScriptSerializer {MaxJsonLength=int.MaxValue}.Deserialize<Database>(File.ReadAllText(file));if(result==null||result.Memes==null||result.Groups==null||result.Settings==null)throw new InvalidDataException();
+   Grouping.Normalize(result);
    // Update untouched defaults from the first release; preserve deliberate customization.
    var p=result.Settings;if(p.Palette=="纸间绿"&&p.Accent=="#437F65"&&p.CardSize==158&&p.Radius==12&&string.IsNullOrEmpty(p.CanvasColor)&&string.IsNullOrEmpty(p.SurfaceColor)&&string.IsNullOrEmpty(p.InkColor)&&string.IsNullOrEmpty(p.SideColor)){p.Palette="港湾雾蓝";p.Accent="#627792";p.CardSize=136;p.Radius=6;}return result;}
   public void Save(){string file=Path.Combine(Root,"library.json"),temp=file+".tmp";File.WriteAllText(temp,new JavaScriptSerializer {MaxJsonLength=int.MaxValue}.Serialize(Data));if(File.Exists(file))File.Replace(temp,file,file+".bak");else File.Move(temp,file);}
@@ -43,18 +47,19 @@ namespace MemeManager {
   public string FileFor(Meme meme){return Path.Combine(Root,"images",meme.Id+meme.Extension);}
   public static bool Supported(string file){return Extensions.Contains(Path.GetExtension(file));}
   public ImportResult Import(IEnumerable<string> paths,string groupId,HashSet<string> known,System.Threading.CancellationToken token,Action<int> progress,bool groupByFolder=false,IEnumerable<Group> existingGroups=null){
-   var result=new ImportResult();int scanned=0;var namedGroups=new Dictionary<string,Group>(StringComparer.OrdinalIgnoreCase);if(groupByFolder)foreach(var group in existingGroups??Data.Groups)if(!namedGroups.ContainsKey(group.Name))namedGroups.Add(group.Name,group);
+   var result=new ImportResult();int scanned=0;var namedGroups=new Dictionary<string,Group>(StringComparer.OrdinalIgnoreCase);var staged=new Dictionary<string,Meme>();
+   if(groupByFolder)foreach(var group in existingGroups??Data.Groups){string key=(group.ParentId??"")+"\\0"+group.Name;if(!namedGroups.ContainsKey(key))namedGroups.Add(key,group);}
+   Func<string,string,string> targetGroup=(folderRoot,file)=>{if(!groupByFolder||folderRoot==null)return groupId;string parent=Path.GetDirectoryName(Path.GetFullPath(file)).TrimEnd(Path.DirectorySeparatorChar)+Path.DirectorySeparatorChar;if(string.Equals(parent,folderRoot,StringComparison.OrdinalIgnoreCase))return groupId;
+    string relative=parent.Substring(folderRoot.Length);string parentId=groupId;foreach(string name in relative.Split(new[]{Path.DirectorySeparatorChar},StringSplitOptions.RemoveEmptyEntries)){string key=(parentId??"")+"\\0"+name;Group group;if(!namedGroups.TryGetValue(key,out group)){group=new Group{Id=Guid.NewGuid().ToString("N"),Name=name,ParentId=parentId};namedGroups.Add(key,group);result.Groups.Add(group);}parentId=group.Id;}return parentId;
+   };
+   Action<string,string> associate=(hash,id)=>{if(id==null)return;List<string> ids;if(!result.Memberships.TryGetValue(hash,out ids)){ids=new List<string>();result.Memberships.Add(hash,ids);}if(!ids.Contains(id))ids.Add(id);Meme item;if(staged.TryGetValue(hash,out item))Grouping.Add(item,id);};
    foreach(string input in paths){IEnumerable<string> files;string folderRoot=null;try{if(Directory.Exists(input)){folderRoot=Path.GetFullPath(input).TrimEnd(Path.DirectorySeparatorChar)+Path.DirectorySeparatorChar;files=Walk(input);}else files=new[]{input};}catch{result.Errors++;continue;}
     foreach(string file in files){if(token.IsCancellationRequested){result.Cancelled=true;return result;}if(!Supported(file))continue;try{
      string hash;using(var sha=SHA256.Create())using(var stream=File.OpenRead(file))hash=BitConverter.ToString(sha.ComputeHash(stream)).Replace("-","").ToLowerInvariant();
-     if(known.Contains(hash)){result.Duplicates++;continue;}
+     if(known.Contains(hash)){associate(hash,targetGroup(folderRoot,file));result.Duplicates++;continue;}
      using(var stream=File.OpenRead(file)){var decoder=BitmapDecoder.Create(stream,BitmapCreateOptions.DelayCreation,BitmapCacheOption.OnLoad);if(decoder.Frames.Count==0||decoder.Frames[0].PixelWidth==0)throw new InvalidDataException();}
-     var item=new Meme{Id=hash,Name=Path.GetFileNameWithoutExtension(file),Extension=Path.GetExtension(file).ToLowerInvariant(),GroupId=groupId,Added=DateTime.Now};
-     string target=FileFor(item);if(!File.Exists(target))File.Copy(file,target);
-     if(groupByFolder&&folderRoot!=null){string parent=Path.GetDirectoryName(Path.GetFullPath(file)).TrimEnd(Path.DirectorySeparatorChar)+Path.DirectorySeparatorChar;
-      if(!string.Equals(parent,folderRoot,StringComparison.OrdinalIgnoreCase)){string name=new DirectoryInfo(Path.GetDirectoryName(Path.GetFullPath(file))).Name;Group group;if(!namedGroups.TryGetValue(name,out group)){group=new Group{Id=Guid.NewGuid().ToString("N"),Name=name};namedGroups.Add(name,group);result.Groups.Add(group);}item.GroupId=group.Id;}
-     }
-     known.Add(hash);result.Items.Add(item);
+     var item=new Meme{Id=hash,Name=Path.GetFileNameWithoutExtension(file),Extension=Path.GetExtension(file).ToLowerInvariant(),Added=DateTime.Now};
+     string target=FileFor(item);if(!File.Exists(target))File.Copy(file,target);string destination=targetGroup(folderRoot,file);Grouping.Add(item,destination);associate(hash,destination);known.Add(hash);result.Items.Add(item);staged.Add(hash,item);
     }catch{result.Errors++;}finally{scanned++;if(scanned%10==0)progress(scanned);}}
    }return result;
   }
