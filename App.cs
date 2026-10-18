@@ -22,7 +22,7 @@ namespace MemeManager {
   string filter="all"; bool rebuilding,importing,exiting,rendering; int rendered,firstRendered=-1; List<Meme> visible=new List<Meme>();
   CancellationTokenSource importCancellation; readonly Dictionary<string,BitmapSource> thumbnails=new Dictionary<string,BitmapSource>();
   readonly List<GifPlayer> players=new List<GifPlayer>(); DispatcherTimer searchTimer,releaseTimer;
-  public ManagerWindow(){RenderOptions.ProcessRenderMode=RenderMode.SoftwareOnly;using(var stream=typeof(ManagerWindow).Assembly.GetManifestResourceStream("MemeManager.MainWindow.xaml"))window=(Window)XamlReader.Load(stream);using(var stream=typeof(ManagerWindow).Assembly.GetManifestResourceStream("MemeManager.Icon.png")){var icon=BitmapFrame.Create(stream,BitmapCreateOptions.None,BitmapCacheOption.OnLoad);icon.Freeze();window.Icon=icon;Find<Image>("BrandIcon").Source=icon;}}
+  public ManagerWindow(){RenderOptions.ProcessRenderMode=RenderMode.SoftwareOnly;using(var stream=typeof(ManagerWindow).Assembly.GetManifestResourceStream("MemeManager.MainWindow.xaml"))window=(Window)XamlReader.Load(stream);using(var stream=typeof(ManagerWindow).Assembly.GetManifestResourceStream("MemeManager.Icon.png")){var icon=BitmapFrame.Create(stream,BitmapCreateOptions.None,BitmapCacheOption.OnLoad);icon.Freeze();window.Icon=icon;Find<Image>("BrandIcon").Source=icon;}AddWindowTitleBar(window,false);}
   T Find<T>(string name) where T:class{return window.FindName(name) as T;}
   void Click(string name,RoutedEventHandler action){Find<Button>(name).Click+=action;}
   public void Initialize(string[] args){
